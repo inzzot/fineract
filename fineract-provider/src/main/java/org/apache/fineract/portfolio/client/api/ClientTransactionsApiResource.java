@@ -18,6 +18,7 @@
  */
 package org.apache.fineract.portfolio.client.api;
 
+import com.google.common.base.Splitter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -25,6 +26,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -34,6 +39,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.UriInfo;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.fineract.commands.domain.CommandWrapper;
@@ -47,6 +53,7 @@ import org.apache.fineract.infrastructure.core.serialization.DefaultToApiJsonSer
 import org.apache.fineract.infrastructure.core.service.Page;
 import org.apache.fineract.infrastructure.core.service.SearchParameters;
 import org.apache.fineract.infrastructure.security.service.PlatformSecurityContext;
+import org.apache.fineract.portfolio.client.data.ClientSavingsAccountTransactionData;
 import org.apache.fineract.portfolio.client.data.ClientTransactionData;
 import org.apache.fineract.portfolio.client.service.ClientTransactionReadPlatformService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,6 +67,7 @@ public class ClientTransactionsApiResource {
     private final PlatformSecurityContext context;
     private final ClientTransactionReadPlatformService clientTransactionReadPlatformService;
     private final DefaultToApiJsonSerializer<ClientTransactionData> toApiJsonSerializer;
+    private final DefaultToApiJsonSerializer<ClientSavingsAccountTransactionData> toApiJsonSavingsAccountSerializer;
     private final ApiRequestParameterHelper apiRequestParameterHelper;
     private final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService;
 
@@ -67,11 +75,13 @@ public class ClientTransactionsApiResource {
     public ClientTransactionsApiResource(final PlatformSecurityContext context,
             final ClientTransactionReadPlatformService clientTransactionReadPlatformService,
             final DefaultToApiJsonSerializer<ClientTransactionData> toApiJsonSerializer,
+            final DefaultToApiJsonSerializer<ClientSavingsAccountTransactionData> toApiJsonSavingsAccountSerializer,
             final ApiRequestParameterHelper apiRequestParameterHelper,
             final PortfolioCommandSourceWritePlatformService commandsSourceWritePlatformService) {
         this.context = context;
         this.clientTransactionReadPlatformService = clientTransactionReadPlatformService;
         this.toApiJsonSerializer = toApiJsonSerializer;
+        this.toApiJsonSavingsAccountSerializer = toApiJsonSavingsAccountSerializer;
         this.apiRequestParameterHelper = apiRequestParameterHelper;
         this.commandsSourceWritePlatformService = commandsSourceWritePlatformService;
     }
@@ -87,8 +97,8 @@ public class ClientTransactionsApiResource {
             @Context final UriInfo uriInfo, @QueryParam("offset") @Parameter(description = "offset") final Integer offset,
             @QueryParam("limit") @Parameter(description = "limit") final Integer limit) {
         this.context.authenticatedUser().validateHasReadPermission(ClientApiConstants.CLIENT_CHARGES_RESOURCE_NAME);
-
-        SearchParameters searchParameters = SearchParameters.forPagination(offset, limit);
+        Map<String, Map<String, List<Object>>> dataTableFilters = createFilterMap(uriInfo);
+        SearchParameters searchParameters = SearchParameters.forPagination(offset, limit, dataTableFilters);
         final Page<ClientTransactionData> clientTransactions = this.clientTransactionReadPlatformService.retrieveAllTransactions(clientId,
                 searchParameters);
 
@@ -150,4 +160,61 @@ public class ClientTransactionsApiResource {
         return StringUtils.isNotBlank(commandParam) && commandParam.trim().equalsIgnoreCase(commandValue);
     }
 
+    @GET
+    @Path("savings")
+    @Consumes({ MediaType.APPLICATION_JSON })
+    @Produces({ MediaType.APPLICATION_JSON })
+    @Operation(summary = "List Client Savings Account Transactions", description = "The list capability of client savings account transaction can support pagination."
+            + "\n\n" + "Example Requests:\n\n" + "clients/189/transactions/savings\n\n"
+            + "clients/189/transactions/savings?offset=10&limit=50\n\n"
+            + "clients/189/transactions/savings?filter.ccpayment.title=\"Master Card\"\n\n"
+            + "clients/189/transactions/savings?filter.ccpayment.creation.period='2020-12-21 12:14:13','2020-12-21 12:14:16'")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "OK", content = @Content(schema = @Schema(implementation = ClientTransactionsApiResourceSwagger.GetClientsClientIdTransactionsResponse.class))) })
+    public String retrieveAllClientSavingsAccountTransactions(
+            @PathParam("clientId") @Parameter(description = "clientId") final Long clientId, @Context final UriInfo uriInfo,
+            @QueryParam("offset") @Parameter(description = "offset") final Integer offset,
+            @QueryParam("limit") @Parameter(description = "limit") final Integer limit) {
+        this.context.authenticatedUser().validateHasReadPermission(ClientApiConstants.CLIENT_CHARGES_RESOURCE_NAME);
+        Map<String, Map<String, List<Object>>> dataTableFilters = createFilterMap(uriInfo);
+        SearchParameters searchParameters = SearchParameters.forPagination(offset, limit, dataTableFilters);
+        final Page<ClientSavingsAccountTransactionData> clientTransactions = this.clientTransactionReadPlatformService
+                .retrieveAllSavingsAccountTransactions(clientId, searchParameters);
+
+        final ApiRequestJsonSerializationSettings settings = this.apiRequestParameterHelper.process(uriInfo.getQueryParameters());
+        return this.toApiJsonSavingsAccountSerializer.serialize(settings, clientTransactions,
+                ClientApiConstants.CLIENT_TRANSACTION_RESPONSE_DATA_PARAMETERS);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Map<String, List<Object>>> createFilterMap(final UriInfo uriInfo) {
+        final int filterKeyIndex = 0;
+        final int dataTableIndex = 1;
+        final int columnIndex = 2;
+        Map<String, Map<String, List<Object>>> filterMap = new HashMap<>();
+        final MultivaluedMap<String, String> queryParameters = uriInfo.getQueryParameters();
+        for (String parameter : queryParameters.keySet()) {
+
+            String[] filterData = Splitter.on('.').splitToList(parameter).toArray(new String[0]);
+            if (filterData.length < 3 || !filterData[filterKeyIndex].equalsIgnoreCase("filter")) {
+                continue;
+            }
+
+            List value;
+            if (filterData.length > 3 && filterData[3].equals("period")) {
+                value = Arrays.asList(queryParameters.get(parameter).get(0).split("\\s*,\\s*"));
+            } else {
+                value = queryParameters.get(parameter);
+            }
+            if (filterMap.containsKey(filterData[dataTableIndex])) {
+                filterMap.get(filterData[dataTableIndex]).put(filterData[columnIndex], value);
+                continue;
+            }
+
+            Map<String, List<Object>> map = new HashMap<>();
+            map.put(filterData[columnIndex], value);
+            filterMap.put(filterData[dataTableIndex], map);
+        }
+        return filterMap;
+    }
 }
