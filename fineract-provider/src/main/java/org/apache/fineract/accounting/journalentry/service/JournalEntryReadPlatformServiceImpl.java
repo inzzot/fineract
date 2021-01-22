@@ -94,6 +94,7 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
     private static final class GLJournalEntryMapper implements RowMapper<JournalEntryData> {
 
         private final JournalEntryAssociationParametersData associationParametersData;
+        private String sqlCountRows;
 
         GLJournalEntryMapper(final JournalEntryAssociationParametersData associationParametersData) {
             if (associationParametersData == null) {
@@ -104,6 +105,9 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         }
 
         public String schema() {
+            final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+            sqlCountRowsBuilder.append("SELECT COUNT(journalEntry.id) ");
+
             StringBuilder sb = new StringBuilder();
             sb.append(" journalEntry.id as id, glAccount.classification_enum as classification ,").append("journalEntry.transaction_id,")
                     .append(" glAccount.name as glAccountName, glAccount.gl_code as glAccountCode,glAccount.id as glAccountId, ")
@@ -133,15 +137,31 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
                     .append(" left join m_office as office on office.id = journalEntry.office_id")
                     .append(" left join m_appuser as creatingUser on creatingUser.id = journalEntry.createdby_id ")
                     .append(" join m_currency curr on curr.code = journalEntry.currency_code ");
+
+            sqlCountRowsBuilder.append(" from acc_gl_journal_entry as journalEntry ")
+                    .append(" left join acc_gl_account as glAccount on glAccount.id = journalEntry.account_id")
+                    .append(" left join m_office as office on office.id = journalEntry.office_id")
+                    .append(" left join m_appuser as creatingUser on creatingUser.id = journalEntry.createdby_id ")
+                    .append(" join m_currency curr on curr.code = journalEntry.currency_code ");
             if (associationParametersData.isTransactionDetailsRequired()) {
                 sb.append(" left join m_loan_transaction as lt on journalEntry.loan_transaction_id = lt.id ")
                         .append(" left join m_savings_account_transaction as st on journalEntry.savings_transaction_id = st.id ")
                         .append(" left join m_payment_detail as pd on lt.payment_detail_id = pd.id or st.payment_detail_id = pd.id or journalEntry.payment_details_id = pd.id")
                         .append(" left join m_payment_type as pt on pt.id = pd.payment_type_id ")
                         .append(" left join m_note as note on lt.id = note.loan_transaction_id or st.id = note.savings_account_transaction_id ");
+                sqlCountRowsBuilder.append(" left join m_loan_transaction as lt on journalEntry.loan_transaction_id = lt.id ")
+                        .append(" left join m_savings_account_transaction as st on journalEntry.savings_transaction_id = st.id ")
+                        .append(" left join m_payment_detail as pd on lt.payment_detail_id = pd.id or st.payment_detail_id = pd.id or journalEntry.payment_details_id = pd.id")
+                        .append(" left join m_payment_type as pt on pt.id = pd.payment_type_id ")
+                        .append(" left join m_note as note on lt.id = note.loan_transaction_id or st.id = note.savings_account_transaction_id ");
             }
+            this.sqlCountRows = sqlCountRowsBuilder.toString();
             return sb.toString();
 
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         @Override
@@ -249,6 +269,9 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             final JournalEntryAssociationParametersData associationParametersData) {
 
         GLJournalEntryMapper rm = new GLJournalEntryMapper(associationParametersData);
+        final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+        sqlCountRowsBuilder.append(rm.getSqlCountRows());
+
         final StringBuilder sqlBuilder = new StringBuilder(200);
         sqlBuilder.append("select SQL_CALC_FOUND_ROWS ");
         sqlBuilder.append(rm.schema());
@@ -262,6 +285,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             objectArray[arrayPos] = transactionId;
             arrayPos = arrayPos + 1;
 
+            sqlCountRowsBuilder.append(whereClose + " journalEntry.transaction_id = ").append(transactionId);
+
             whereClose = " and ";
         }
 
@@ -272,6 +297,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             objectArray[arrayPos] = entityType;
             arrayPos = arrayPos + 1;
 
+            sqlCountRowsBuilder.append(whereClose + " journalEntry.entity_type_enum = ").append(entityType);
+
             whereClose = " and ";
         }
 
@@ -279,6 +306,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             sqlBuilder.append(whereClose + " journalEntry.office_id = ?");
             objectArray[arrayPos] = searchParameters.getOfficeId();
             arrayPos = arrayPos + 1;
+
+            sqlCountRowsBuilder.append(whereClose + " journalEntry.office_id = ").append(searchParameters.getOfficeId());
 
             whereClose = " and ";
         }
@@ -288,6 +317,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             objectArray[arrayPos] = searchParameters.getCurrencyCode();
             arrayPos = arrayPos + 1;
 
+            sqlCountRowsBuilder.append(whereClose + " journalEntry.currency_code = ").append(searchParameters.getCurrencyCode());
+
             whereClose = " and ";
         }
 
@@ -295,6 +326,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             sqlBuilder.append(whereClose + " journalEntry.account_id = ?");
             objectArray[arrayPos] = glAccountId;
             arrayPos = arrayPos + 1;
+
+            sqlCountRowsBuilder.append(whereClose + " journalEntry.account_id = ").append(glAccountId);
 
             whereClose = " and ";
         }
@@ -306,19 +339,25 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             if (fromDate != null && toDate != null) {
                 sqlBuilder.append(whereClose + " journalEntry.entry_date between ? and ? ");
 
-                whereClose = " and ";
-
                 fromDateString = df.format(fromDate);
                 toDateString = df.format(toDate);
                 objectArray[arrayPos] = fromDateString;
                 arrayPos = arrayPos + 1;
                 objectArray[arrayPos] = toDateString;
                 arrayPos = arrayPos + 1;
+
+                sqlCountRowsBuilder.append(whereClose + " journalEntry.entry_date between '").append(fromDateString).append("' and '")
+                        .append(toDateString).append("' ");
+
+                whereClose = " and ";
             } else if (fromDate != null) {
                 sqlBuilder.append(whereClose + " journalEntry.entry_date >= ? ");
                 fromDateString = df.format(fromDate);
                 objectArray[arrayPos] = fromDateString;
                 arrayPos = arrayPos + 1;
+
+                sqlCountRowsBuilder.append(whereClose + " journalEntry.entry_date >= '").append(fromDateString).append("' ");
+
                 whereClose = " and ";
 
             } else if (toDate != null) {
@@ -327,6 +366,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
                 objectArray[arrayPos] = toDateString;
                 arrayPos = arrayPos + 1;
 
+                sqlCountRowsBuilder.append(whereClose + " journalEntry.entry_date <= '").append(toDateString).append("' ");
+
                 whereClose = " and ";
             }
         }
@@ -334,15 +375,20 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         if (onlyManualEntries != null) {
             if (onlyManualEntries) {
                 sqlBuilder.append(whereClose + " journalEntry.manual_entry = 1");
+                sqlCountRowsBuilder.append(whereClose + " journalEntry.manual_entry = 1");
 
                 whereClose = " and ";
             }
         }
 
         if (searchParameters.isLoanIdPassed()) {
-            sqlBuilder.append(whereClose + " journalEntry.loan_transaction_id  in (select id from m_loan_transaction where loan_id = ?)");
+            sqlBuilder.append(whereClose + " journalEntry.loan_transaction_id  in (select id from m_loan_transaction where loan_id = ?) ");
             objectArray[arrayPos] = searchParameters.getLoanId();
             arrayPos = arrayPos + 1;
+
+            sqlCountRowsBuilder
+                    .append(whereClose + " journalEntry.loan_transaction_id  in (select id from m_loan_transaction where loan_id = ")
+                    .append(searchParameters.getLoanId()).append(") ");
 
             whereClose = " and ";
         }
@@ -352,7 +398,9 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
             objectArray[arrayPos] = searchParameters.getSavingsId();
             arrayPos = arrayPos + 1;
 
-            whereClose = " and ";
+            sqlCountRowsBuilder.append(whereClose).append(
+                    " journalEntry.savings_transaction_id in (select id from m_savings_account_transaction where savings_account_id = ")
+                    .append(searchParameters.getSavingsId()).append(") ");
         }
 
         if (searchParameters.isOrderByRequested()) {
@@ -375,8 +423,8 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         }
 
         final Object[] finalObjectArray = Arrays.copyOf(objectArray, arrayPos);
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
-        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sqlBuilder.toString(), finalObjectArray, rm);
+        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRowsBuilder.toString(), sqlBuilder.toString(), finalObjectArray,
+                rm);
     }
 
     @Override
@@ -528,11 +576,17 @@ public class JournalEntryReadPlatformServiceImpl implements JournalEntryReadPlat
         JournalEntryAssociationParametersData associationParametersData = new JournalEntryAssociationParametersData(true, true);
         try {
             final GLJournalEntryMapper rm = new GLJournalEntryMapper(associationParametersData);
+            final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+
             final String sql = "select " + rm.schema()
                     + " where journalEntry.transaction_id = ? and journalEntry.entity_id = ? and journalEntry.entity_type_enum = ?";
-            final String sqlCountRows = "SELECT FOUND_ROWS()";
+
+            sqlCountRowsBuilder.append(rm.getSqlCountRows()).append(" where journalEntry.transaction_id = ").append(transactionId)
+                    .append(" and journalEntry.entity_id = ").append(entityId).append(" and journalEntry.entity_type_enum = ")
+                    .append(entityType);
+
             Object[] data = { transactionId, entityId, entityType };
-            return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sql, data, rm);
+            return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRowsBuilder.toString(), sql, data, rm);
         } catch (final EmptyResultDataAccessException e) {
             throw new JournalEntriesNotFoundException(entityId, e);
         }

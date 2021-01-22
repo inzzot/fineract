@@ -117,35 +117,52 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
     private static final class AuditMapper implements RowMapper<AuditData> {
 
+        private static final String SQL_WITH_COMMAND_AS_JSON_STRING = "SELECT aud.id as id, aud.action_name as actionName, aud.entity_name as entityName,"
+                + " aud.resource_id as resourceId, aud.subresource_id as subresourceId,aud.client_id as clientId, aud.loan_id as loanId,"
+                + " mk.username as maker, aud.made_on_date as madeOnDate, " + " aud.api_get_url as resourceGetUrl, "
+                + "ck.username as checker, aud.checked_on_date as checkedOnDate, ev.enum_message_property as processingResult "
+                + ", aud.command_as_json as commandAsJson, "
+                + " o.name as officeName, gl.level_name as groupLevelName, g.display_name as groupName, c.display_name as clientName, "
+                + " l.account_no as loanAccountNo, s.account_no as savingsAccountNo ";
+        private static final String SQL_WITHOUT_COMMAND_AS_JSON_STRING = "SELECT aud.id as id, aud.action_name as actionName, aud.entity_name as entityName,"
+                + " aud.resource_id as resourceId, aud.subresource_id as subresourceId,aud.client_id as clientId, aud.loan_id as loanId,"
+                + " mk.username as maker, aud.made_on_date as madeOnDate, " + " aud.api_get_url as resourceGetUrl, "
+                + "ck.username as checker, aud.checked_on_date as checkedOnDate, ev.enum_message_property as processingResult, "
+                + " o.name as officeName, gl.level_name as groupLevelName, g.display_name as groupName, c.display_name as clientName, "
+                + " l.account_no as loanAccountNo, s.account_no as savingsAccountNo ";
+        private static final String SQL_FROM_SECTION = " from m_portfolio_command_source aud "
+                + " left join m_appuser mk on mk.id = aud.maker_id" + " left join m_appuser ck on ck.id = aud.checker_id"
+                + " left join m_office o on o.id = aud.office_id" + " left join m_group g on g.id = aud.group_id"
+                + " left join m_group_level gl on gl.id = g.level_id" + " left join m_client c on c.id = aud.client_id"
+                + " left join m_loan l on l.id = aud.loan_id" + " left join m_savings_account s on s.id = aud.savings_account_id"
+                + " left join r_enum_value ev on ev.enum_name = 'processing_result_enum' and ev.enum_id = aud.processing_result_enum";
+        private static final String SQL_COUNT_ROWS = "SELECT COUNT(aud.id) " + SQL_FROM_SECTION;
+
         public String schema(final boolean includeJson, final String hierarchy) {
+            final StringBuilder sqlBuilder = new StringBuilder(200);
 
-            String commandAsJsonString = "";
             if (includeJson) {
-                commandAsJsonString = ", aud.command_as_json as commandAsJson ";
+                sqlBuilder.append(SQL_WITH_COMMAND_AS_JSON_STRING);
+            } else {
+                sqlBuilder.append(SQL_WITHOUT_COMMAND_AS_JSON_STRING);
             }
+            sqlBuilder.append(SQL_FROM_SECTION);
 
-            String partSql = " aud.id as id, aud.action_name as actionName, aud.entity_name as entityName,"
-                    + " aud.resource_id as resourceId, aud.subresource_id as subresourceId,aud.client_id as clientId, aud.loan_id as loanId,"
-                    + " mk.username as maker, aud.made_on_date as madeOnDate, " + " aud.api_get_url as resourceGetUrl, "
-                    + "ck.username as checker, aud.checked_on_date as checkedOnDate, ev.enum_message_property as processingResult "
-                    + commandAsJsonString + ", "
-                    + " o.name as officeName, gl.level_name as groupLevelName, g.display_name as groupName, c.display_name as clientName, "
-                    + " l.account_no as loanAccountNo, s.account_no as savingsAccountNo " + " from m_portfolio_command_source aud "
-                    + " left join m_appuser mk on mk.id = aud.maker_id" + " left join m_appuser ck on ck.id = aud.checker_id"
-                    + " left join m_office o on o.id = aud.office_id" + " left join m_group g on g.id = aud.group_id"
-                    + " left join m_group_level gl on gl.id = g.level_id" + " left join m_client c on c.id = aud.client_id"
-                    + " left join m_loan l on l.id = aud.loan_id" + " left join m_savings_account s on s.id = aud.savings_account_id"
-                    + " left join r_enum_value ev on ev.enum_name = 'processing_result_enum' and ev.enum_id = aud.processing_result_enum";
-
-            // data scoping: head office (hierarchy = ".") can see all audit
-            // entries
+            // data scoping: head office (hierarchy = ".") can see all audit entries
             if (!hierarchy.equals(".")) {
-                partSql += " join m_office o2 on o2.id = aud.office_id and o2.hierarchy like '" + hierarchy + "%' ";
+                sqlBuilder.append(" join m_office o2 on o2.id = aud.office_id and o2.hierarchy like '")
+                        .append(hierarchy).append( "%' ");
             }
 
-            return partSql;
+            return sqlBuilder.toString();
         }
 
+        public String getSqlCountRows(final String hierarchy) {
+            if (hierarchy.equals(".")) {
+                return SQL_COUNT_ROWS;
+            }
+            return SQL_COUNT_ROWS + " join m_office o2 on o2.id = aud.office_id and o2.hierarchy like '" + hierarchy + "%' ";
+        }
         @Override
         public AuditData mapRow(final ResultSet rs, @SuppressWarnings("unused") final int rowNum) throws SQLException {
 
@@ -196,12 +213,14 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         this.paginationParametersDataValidator.validateParameterValues(parameters, supportedOrderByValues, "audits");
         final AppUser currentUser = this.context.authenticatedUser();
         final String hierarchy = currentUser.getOffice().getHierarchy();
+        final String sqlTemplate = extraCriteria.getSQLTemplate();
 
         final AuditMapper rm = new AuditMapper();
+        final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+        sqlCountRowsBuilder.append(rm.getSqlCountRows(hierarchy)).append(' ').append(sqlTemplate);
+
         final StringBuilder sqlBuilder = new StringBuilder(200);
-        sqlBuilder.append("select SQL_CALC_FOUND_ROWS ");
-        sqlBuilder.append(rm.schema(includeJson, hierarchy));
-        sqlBuilder.append(' ').append(extraCriteria.getSQLTemplate());
+        sqlBuilder.append(rm.schema(includeJson, hierarchy)).append(' ').append(sqlTemplate);
         if (parameters.isOrderByRequested()) {
             sqlBuilder.append(' ').append(parameters.orderBySql());
             this.columnValidator.validateSqlInjection(sqlBuilder.toString(), parameters.orderBySql());
@@ -215,9 +234,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         }
 
         LOG.info("sql: {}", sqlBuilder);
-
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
-        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sqlBuilder.toString(), extraCriteria.getArguments(), rm);
+        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRowsBuilder.toString(), sqlBuilder.toString(), extraCriteria.getArguments(), rm);
     }
 
     @Override
@@ -238,7 +255,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
         final String hierarchy = currentUser.getOffice().getHierarchy();
 
         final AuditMapper rm = new AuditMapper();
-        String sql = "select " + rm.schema(includeJson, hierarchy);
+        String sql = rm.schema(includeJson, hierarchy);
 
         Boolean isLimitedChecker = false;
         if (useType.equals("makerchecker")) {
@@ -267,7 +284,7 @@ public class AuditReadPlatformServiceImpl implements AuditReadPlatformService {
 
         final AuditMapper rm = new AuditMapper();
 
-        final String sql = "select " + rm.schema(true, hierarchy) + " where aud.id = ? ";
+        final String sql = rm.schema(true, hierarchy) + " where aud.id = ? ";
 
         final AuditData auditResult = this.jdbcTemplate.queryForObject(sql, rm, auditId);
 

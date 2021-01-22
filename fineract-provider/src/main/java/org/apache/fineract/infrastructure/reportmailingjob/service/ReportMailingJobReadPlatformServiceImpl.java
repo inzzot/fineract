@@ -59,14 +59,15 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
     @Override
     public Page<ReportMailingJobData> retrieveAllReportMailingJobs(final SearchParameters searchParameters) {
         final StringBuilder sqlStringBuilder = new StringBuilder(200);
+        final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
         final List<Object> queryParameters = new ArrayList<>();
         final ReportMailingJobMapper mapper = new ReportMailingJobMapper();
         final PaginationHelper<ReportMailingJobData> paginationHelper = new PaginationHelper<>();
 
-        sqlStringBuilder.append("select SQL_CALC_FOUND_ROWS ");
-        sqlStringBuilder.append(mapper.reportMailingJobSchema());
-        sqlStringBuilder.append(" where rmj.is_deleted = 0");
-
+        sqlStringBuilder.append("select ").append(mapper.schema());
+        String where = " where rmj.is_deleted = 0";
+        sqlStringBuilder.append(where);
+        sqlCountRowsBuilder.append(mapper.getSqlCountRows()).append(where);
         if (searchParameters.isOrderByRequested()) {
             sqlStringBuilder.append(" order by ").append(searchParameters.getOrderBy());
             this.columnValidator.validateSqlInjection(sqlStringBuilder.toString(), searchParameters.getOrderBy());
@@ -86,14 +87,14 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
             }
         }
 
-        return paginationHelper.fetchPage(this.jdbcTemplate, "SELECT FOUND_ROWS()", sqlStringBuilder.toString(), queryParameters.toArray(),
+        return paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRowsBuilder.toString(), sqlStringBuilder.toString(), queryParameters.toArray(),
                 mapper);
     }
 
     @Override
     public Collection<ReportMailingJobData> retrieveAllActiveReportMailingJobs() {
         final ReportMailingJobMapper mapper = new ReportMailingJobMapper();
-        final String sql = "select " + mapper.reportMailingJobSchema() + " where rmj.is_deleted = 0 and is_active = 1"
+        final String sql = "select " + mapper.schema() + " where rmj.is_deleted = 0 and is_active = 1"
                 + " order by rmj.name";
 
         return this.jdbcTemplate.query(sql, mapper, new Object[] {});
@@ -103,7 +104,7 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
     public ReportMailingJobData retrieveReportMailingJob(final Long reportMailingJobId) {
         try {
             final ReportMailingJobMapper mapper = new ReportMailingJobMapper();
-            final String sql = "select " + mapper.reportMailingJobSchema() + " where rmj.id = ? and rmj.is_deleted = 0";
+            final String sql = "select " + mapper.schema() + " where rmj.id = ? and rmj.is_deleted = 0";
 
             return this.jdbcTemplate.queryForObject(sql, mapper, new Object[] { reportMailingJobId });
         }
@@ -122,23 +123,32 @@ public class ReportMailingJobReadPlatformServiceImpl implements ReportMailingJob
     }
 
     private static final class ReportMailingJobMapper implements RowMapper<ReportMailingJobData> {
+        private final String sqlCountRows = "SELECT COUNT(rmj.id) from m_report_mailing_job rmj " +
+                "inner join m_appuser cbu on cbu.id = rmj.createdby_id left join m_appuser mbu " +
+                "on mbu.id = rmj.lastmodifiedby_id left join stretchy_report sr on rmj.stretchy_report_id = sr.id";
+        private final String schema = "rmj.id, rmj.name, rmj.description, rmj.start_datetime as startDateTime, " +
+                "rmj.recurrence, rmj.created_date as createdOnDate, " +
+                "cbu.username as createdByUsername, cbu.firstname as createdByFirstname, cbu.lastname as createdByLastname, " +
+                "rmj.lastmodified_date as updatedOnDate, " +
+                "mbu.username as updatedByUsername, mbu.firstname as updatedByFirstname, mbu.lastname as updatedByLastname, " +
+                "rmj.email_recipients as emailRecipients, rmj.email_subject as emailSubject, rmj.email_message as emailMessage, " +
+                "rmj.email_attachment_file_format as emailAttachmentFileFormat, " +
+                "rmj.stretchy_report_param_map as stretchyReportParamMap, rmj.previous_run_datetime as previousRunDateTime, " +
+                "rmj.next_run_datetime as nextRunDateTime, rmj.previous_run_status as previousRunStatus, " +
+                "rmj.previous_run_error_log as previousRunErrorLog, rmj.previous_run_error_message as previousRunErrorMessage, " +
+                "rmj.number_of_runs as numberOfRuns, rmj.is_active as isActive, rmj.run_as_userid as runAsUserId, " +
+                "sr.id as reportId, sr.report_name as reportName, sr.report_type as reportType, sr.report_subtype as reportSubType, " +
+                "sr.report_category as reportCategory, sr.report_sql as reportSql, sr.description as reportDescription, " +
+                "sr.core_report as coreReport, sr.use_report as useReport from m_report_mailing_job rmj " +
+                "inner join m_appuser cbu on cbu.id = rmj.createdby_id left join m_appuser mbu " +
+                "on mbu.id = rmj.lastmodifiedby_id left join stretchy_report sr on rmj.stretchy_report_id = sr.id";
 
-        public String reportMailingJobSchema() {
-            return "rmj.id, rmj.name, rmj.description, rmj.start_datetime as startDateTime, rmj.recurrence, rmj.created_date as createdOnDate, "
-                    + "cbu.username as createdByUsername, cbu.firstname as createdByFirstname, cbu.lastname as createdByLastname, "
-                    + "rmj.lastmodified_date as updatedOnDate, "
-                    + "mbu.username as updatedByUsername, mbu.firstname as updatedByFirstname, mbu.lastname as updatedByLastname, "
-                    + "rmj.email_recipients as emailRecipients, " + "rmj.email_subject as emailSubject, rmj.email_message as emailMessage, "
-                    + "rmj.email_attachment_file_format as emailAttachmentFileFormat, "
-                    + "rmj.stretchy_report_param_map as stretchyReportParamMap, rmj.previous_run_datetime as previousRunDateTime, "
-                    + "rmj.next_run_datetime as nextRunDateTime, rmj.previous_run_status as previousRunStatus, "
-                    + "rmj.previous_run_error_log as previousRunErrorLog, rmj.previous_run_error_message as previousRunErrorMessage, "
-                    + "rmj.number_of_runs as numberOfRuns, rmj.is_active as isActive, rmj.run_as_userid as runAsUserId, "
-                    + "sr.id as reportId, sr.report_name as reportName, sr.report_type as reportType, sr.report_subtype as reportSubType, "
-                    + "sr.report_category as reportCategory, sr.report_sql as reportSql, sr.description as reportDescription, "
-                    + "sr.core_report as coreReport, sr.use_report as useReport " + "from m_report_mailing_job rmj "
-                    + "inner join m_appuser cbu " + "on cbu.id = rmj.createdby_id " + "left join m_appuser mbu "
-                    + "on mbu.id = rmj.lastmodifiedby_id " + "left join stretchy_report sr " + "on rmj.stretchy_report_id = sr.id";
+        public String schema() {
+            return schema;
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         @Override

@@ -78,9 +78,7 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
         }
         final JobHistoryMapper jobHistoryMapper = new JobHistoryMapper();
         final StringBuilder sqlBuilder = new StringBuilder(200);
-        sqlBuilder.append("select SQL_CALC_FOUND_ROWS ");
-        sqlBuilder.append(jobHistoryMapper.schema());
-        sqlBuilder.append(" where job.id=?");
+        sqlBuilder.append("select ").append(jobHistoryMapper.schema()).append(" where job.id = ?");
         if (searchParameters.isOrderByRequested()) {
             sqlBuilder.append(" order by ").append(searchParameters.getOrderBy());
             this.columnValidator.validateSqlInjection(sqlBuilder.toString(), searchParameters.getOrderBy());
@@ -97,7 +95,7 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
             }
         }
 
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
+        final String sqlCountRows = jobHistoryMapper.getSqlCountRows() + " where job.id = " + jobId;
         return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sqlBuilder.toString(), new Object[] { jobId },
                 jobHistoryMapper);
     }
@@ -172,12 +170,17 @@ public class SchedulerJobRunnerReadServiceImpl implements SchedulerJobRunnerRead
 
     private static final class JobHistoryMapper implements RowMapper<JobDetailHistoryData> {
 
-        private final StringBuilder sqlBuilder = new StringBuilder(200).append(
-                " runHistory.version,runHistory.start_time as runStartTime,runHistory.end_time as runEndTime,runHistory.`status`,runHistory.error_message as jobRunErrorMessage,runHistory.trigger_type as triggerType,runHistory.error_log as jobRunErrorLog ")
-                .append(" from job job join job_run_history runHistory ON job.id=runHistory.job_id");
+        private final String sqlCountRows = "SELECT COUNT(job.id) from job job join job_run_history runHistory ON job.id = runHistory.job_id ";
+        private final String schema = " runHistory.version,runHistory.start_time as runStartTime,runHistory.end_time as runEndTime,runHistory.`status`," +
+                "runHistory.error_message as jobRunErrorMessage,runHistory.trigger_type as triggerType,runHistory.error_log as jobRunErrorLog " +
+                " from job job join job_run_history runHistory ON job.id=runHistory.job_id";
 
         public String schema() {
-            return this.sqlBuilder.toString();
+            return this.schema;
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         @Override

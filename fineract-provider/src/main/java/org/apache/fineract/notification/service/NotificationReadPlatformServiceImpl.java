@@ -114,28 +114,32 @@ public class NotificationReadPlatformServiceImpl implements NotificationReadPlat
     @Override
     public Page<NotificationData> getAllUnreadNotifications(final SearchParameters searchParameters) {
         final Long appUserId = context.authenticatedUser().getId();
-        String sql = "SELECT SQL_CALC_FOUND_ROWS ng.id as id, nm.user_id as userId, ng.object_type as objectType, "
+        String sql = "SELECT ng.id as id, nm.user_id as userId, ng.object_type as objectType, "
                 + "ng.object_identifier as objectId, ng.actor as actor, ng.action action, ng.notification_content "
                 + "as content, ng.is_system_generated as isSystemGenerated, nm.created_at as createdAt "
                 + "FROM notification_mapper nm INNER JOIN notification_generator ng ON nm.notification_id = ng.id "
                 + "WHERE nm.user_id = ? AND nm.is_read = false order by nm.created_at desc";
-
-        return getNotificationDataPage(searchParameters, appUserId, sql);
+        final String sqlCountRows = "SELECT COUNT(ng.id) "
+                + "FROM notification_mapper nm INNER JOIN notification_generator ng ON nm.notification_id = ng.id "
+                + "WHERE nm.is_read = false AND nm.user_id = " + appUserId;
+        return getNotificationDataPage(searchParameters, appUserId, sql, sqlCountRows);
     }
 
     @Override
     public Page<NotificationData> getAllNotifications(SearchParameters searchParameters) {
         final Long appUserId = context.authenticatedUser().getId();
-        String sql = "SELECT SQL_CALC_FOUND_ROWS ng.id as id, nm.user_id as userId, ng.object_type as objectType, "
+        String sql = "SELECT ng.id as id, nm.user_id as userId, ng.object_type as objectType, "
                 + "ng.object_identifier as objectId, ng.actor as actor, ng.action action, ng.notification_content "
                 + "as content, ng.is_system_generated as isSystemGenerated, nm.created_at as createdAt "
                 + "FROM notification_mapper nm INNER JOIN notification_generator ng ON nm.notification_id = ng.id "
                 + "WHERE nm.user_id = ? order by nm.created_at desc";
-
-        return getNotificationDataPage(searchParameters, appUserId, sql);
+        final String sqlCountRows = "SELECT COUNT(ng.id) "
+                + "FROM notification_mapper nm INNER JOIN notification_generator ng ON nm.notification_id = ng.id "
+                + "WHERE nm.user_id = " + appUserId;
+        return getNotificationDataPage(searchParameters, appUserId, sql, sqlCountRows);
     }
 
-    private Page<NotificationData> getNotificationDataPage(SearchParameters searchParameters, Long appUserId, String sql) {
+    private Page<NotificationData> getNotificationDataPage(SearchParameters searchParameters, Long appUserId, String sql, String sqlCountRows) {
         final StringBuilder sqlBuilder = new StringBuilder(200);
         sqlBuilder.append(sql);
 
@@ -155,7 +159,6 @@ public class NotificationReadPlatformServiceImpl implements NotificationReadPlat
             }
         }
 
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
         Object[] params = new Object[] { appUserId };
         return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sqlBuilder.toString(), params, this.notificationDataRow);
     }

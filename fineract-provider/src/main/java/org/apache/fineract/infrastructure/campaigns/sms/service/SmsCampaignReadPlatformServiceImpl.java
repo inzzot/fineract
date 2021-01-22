@@ -87,7 +87,7 @@ public class SmsCampaignReadPlatformServiceImpl implements SmsCampaignReadPlatfo
     public Page<SmsCampaignData> retrieveAll(final SearchParameters searchParameters) {
         final Integer visible = 1;
         final StringBuilder sqlBuilder = new StringBuilder(200);
-        sqlBuilder.append("select SQL_CALC_FOUND_ROWS ");
+        sqlBuilder.append("select ");
         sqlBuilder.append(this.smsCampaignMapper.schema() + " where sc.is_visible = ? ");
         if (searchParameters.isLimited()) {
             sqlBuilder.append(" limit ").append(searchParameters.getLimit());
@@ -95,7 +95,8 @@ public class SmsCampaignReadPlatformServiceImpl implements SmsCampaignReadPlatfo
                 sqlBuilder.append(" offset ").append(searchParameters.getOffset());
             }
         }
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
+
+        final String sqlCountRows = this.smsCampaignMapper.getSqlCountRows() + " where sc.is_visible = " + visible;
         return this.paginationHelper.fetchPage(jdbcTemplate, sqlCountRows, sqlBuilder.toString(), new Object[] { visible },
                 this.smsCampaignMapper);
     }
@@ -197,7 +198,8 @@ public class SmsCampaignReadPlatformServiceImpl implements SmsCampaignReadPlatfo
 
     private static final class SmsCampaignMapper implements RowMapper<SmsCampaignData> {
 
-        final String schema;
+        private final String sqlCountRows;
+        private final String schema;
 
         private SmsCampaignMapper() {
             final StringBuilder sql = new StringBuilder(400);
@@ -228,11 +230,23 @@ public class SmsCampaignReadPlatformServiceImpl implements SmsCampaignReadPlatfo
             sql.append("left join m_appuser clu on clu.id = sc.closedon_userid ");
             sql.append("left join stretchy_report sr on sr.id = sc.report_id ");
 
+            final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+            sqlCountRowsBuilder.append("SELECT COUNT(sc.id ) from sms_campaign sc ")
+                    .append("left join m_appuser sbu on sbu.id = sc.submittedon_userid ")
+                    .append("left join m_appuser acu on acu.id = sc.approvedon_userid ")
+                    .append("left join m_appuser clu on clu.id = sc.closedon_userid ")
+                    .append("left join stretchy_report sr on sr.id = sc.report_id ");
+
+            this.sqlCountRows = sqlCountRowsBuilder.toString();
             this.schema = sql.toString();
         }
 
         public String schema() {
             return this.schema;
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         @Override

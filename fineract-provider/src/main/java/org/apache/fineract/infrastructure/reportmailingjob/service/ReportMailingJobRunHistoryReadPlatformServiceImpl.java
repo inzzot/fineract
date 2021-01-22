@@ -53,15 +53,18 @@ public class ReportMailingJobRunHistoryReadPlatformServiceImpl implements Report
     @Override
     public Page<ReportMailingJobRunHistoryData> retrieveRunHistoryByJobId(final Long reportMailingJobId,
             final SearchParameters searchParameters) {
+        final StringBuilder sqlRowCountStringBuilder = new StringBuilder(200);
+        sqlRowCountStringBuilder.append(this.reportMailingJobRunHistoryMapper.getSqlCountRows());
+
         final StringBuilder sqlStringBuilder = new StringBuilder(200);
         final List<Object> queryParameters = new ArrayList<>();
 
-        sqlStringBuilder.append("select SQL_CALC_FOUND_ROWS ");
-        sqlStringBuilder.append(this.reportMailingJobRunHistoryMapper.reportMailingJobRunHistorySchema());
+        sqlStringBuilder.append("select ").append(this.reportMailingJobRunHistoryMapper.schema());
 
         if (reportMailingJobId != null) {
             sqlStringBuilder.append(" where rmjrh.job_id = ? ");
             queryParameters.add(reportMailingJobId);
+            sqlRowCountStringBuilder.append(" where rmjrh.job_id = ").append(reportMailingJobId);
         }
 
         if (searchParameters.isOrderByRequested()) {
@@ -81,16 +84,24 @@ public class ReportMailingJobRunHistoryReadPlatformServiceImpl implements Report
             }
         }
 
-        return this.paginationHelper.fetchPage(this.jdbcTemplate, "SELECT FOUND_ROWS()", sqlStringBuilder.toString(),
+        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlRowCountStringBuilder.toString(), sqlStringBuilder.toString(),
                 queryParameters.toArray(), this.reportMailingJobRunHistoryMapper);
     }
 
     private static final class ReportMailingJobRunHistoryMapper implements RowMapper<ReportMailingJobRunHistoryData> {
 
-        public String reportMailingJobRunHistorySchema() {
-            return "rmjrh.id, rmjrh.job_id as reportMailingJobId, rmjrh.start_datetime as startDateTime, "
-                    + "rmjrh.end_datetime as endDateTime, rmjrh.status, rmjrh.error_message as errorMessage, "
-                    + "rmjrh.error_log as errorLog " + "from m_report_mailing_job_run_history rmjrh";
+        private final String sqlCountRows = "SELECT COUNT(rmjrh.id) from m_report_mailing_job_run_history rmjrh ";
+        private final String schema = "rmjrh.id, rmjrh.job_id as reportMailingJobId, rmjrh.start_datetime as startDateTime, "
+                + "rmjrh.end_datetime as endDateTime, rmjrh.status, rmjrh.error_message as errorMessage, "
+                + "rmjrh.error_log as errorLog from m_report_mailing_job_run_history rmjrh";
+
+
+        public String schema() {
+            return schema;
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         @Override

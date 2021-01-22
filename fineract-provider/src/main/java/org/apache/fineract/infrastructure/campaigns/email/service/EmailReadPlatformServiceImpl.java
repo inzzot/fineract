@@ -56,9 +56,11 @@ public class EmailReadPlatformServiceImpl implements EmailReadPlatformService {
 
     private static final class EmailMapper implements RowMapper<EmailData> {
 
-        final String schema;
+        private final String sqlCountRows;
+        private final String schema;
 
         EmailMapper() {
+            final String tableName = tableName();
             final StringBuilder sql = new StringBuilder(300);
             sql.append(" emo.id as id, ");
             sql.append("emo.group_id as groupId, ");
@@ -71,13 +73,21 @@ public class EmailReadPlatformServiceImpl implements EmailReadPlatformService {
             sql.append("emo.email_subject as emailSubject, ");
             sql.append("emo.message as message, ");
             sql.append("emo.error_message as errorMessage ");
-            sql.append("from " + tableName() + " emo");
+            sql.append("from " + tableName + " emo ");
+
+            final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+            sqlCountRowsBuilder.append("SELECT COUNT(emo.id) from").append(tableName).append(" emo ");
 
             this.schema = sql.toString();
+            this.sqlCountRows = sqlCountRowsBuilder.toString();
         }
 
         public String schema() {
             return this.schema;
+        }
+
+        public String getSqlCountRows() {
+            return sqlCountRows;
         }
 
         public String tableName() {
@@ -174,11 +184,15 @@ public class EmailReadPlatformServiceImpl implements EmailReadPlatformService {
 
     @Override
     public Page<EmailData> retrieveEmailByStatus(final Integer limit, final Integer status, final Date dateFrom, final Date dateTo) {
+        final StringBuilder sqlCountRowsBuilder = new StringBuilder(200);
+        sqlCountRowsBuilder.append(this.emailRowMapper.getSqlCountRows());
+
         final StringBuilder sqlBuilder = new StringBuilder(200);
-        sqlBuilder.append("select SQL_CALC_FOUND_ROWS ");
+        sqlBuilder.append("select ");
         sqlBuilder.append(this.emailRowMapper.schema());
         if (status != null) {
-            sqlBuilder.append(" where emo.status_enum= ? ");
+            sqlBuilder.append(" where emo.status_enum = ? ");
+            sqlCountRowsBuilder.append(" where emo.status_enum = ").append(status);
         }
         String fromDateString = null;
         String toDateString = null;
@@ -187,13 +201,14 @@ public class EmailReadPlatformServiceImpl implements EmailReadPlatformService {
             fromDateString = df.format(dateFrom);
             toDateString = df.format(dateTo);
             sqlBuilder.append(" and emo.submittedon_date >= ? and emo.submittedon_date <= ? ");
+            sqlCountRowsBuilder.append(" and emo.submittedon_date >= '").append(fromDateString)
+                    .append("' and emo.submittedon_date <= '").append(dateTo).append("' ");
         }
         final String sqlPlusLimit = (limit > 0) ? " limit 0, " + limit : "";
         if (!sqlPlusLimit.isEmpty()) {
             sqlBuilder.append(sqlPlusLimit);
         }
-        final String sqlCountRows = "SELECT FOUND_ROWS()";
-        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRows, sqlBuilder.toString(),
+        return this.paginationHelper.fetchPage(this.jdbcTemplate, sqlCountRowsBuilder.toString(), sqlBuilder.toString(),
                 new Object[] { status, fromDateString, toDateString }, this.emailRowMapper);
     }
 }
