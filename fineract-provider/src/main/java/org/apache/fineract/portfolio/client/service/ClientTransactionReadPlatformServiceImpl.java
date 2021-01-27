@@ -96,6 +96,7 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
         private String sqlCountRows;
         private final DataSource dataSource;
         private Map<String, Map<String, List<Object>>> filter;
+        private List<String> dataTablesName;
 
         ClientTransactionMapper(DataSource dataSource) {
             final StringBuilder sqlBuilder = new StringBuilder(400);
@@ -123,15 +124,18 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
 
         public String schema(Map<String, Map<String, List<Object>>> filter) {
             this.filter = filter;
-            if (filter.isEmpty()) {
-                return schema();
-            }
+            // if (filter.isEmpty()) {
+            // return schema();
+            // }
+            this.dataTablesName = getDataTableNames(new JdbcTemplate(dataSource), "m_savings_account_transaction");
             final StringBuilder sqlCountRowsBuilder = new StringBuilder(400);
-            sqlCountRowsBuilder.append(this.sqlCountRows);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_COUNT_SELECTION);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_FROM_PART);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_JOIN_PART);
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
             sqlBuilder.append(SCHEMA_SQL_SELECTION_PART);
-            for (String tableName : filter.keySet()) {
+            for (String tableName : dataTablesName) {
                 List<String> columnNames = getTableColumns(this.dataSource, tableName);
                 for (String columnName : columnNames) {
                     sqlBuilder.append(", " + tableName + "." + columnName + " as " + tableName + "_" + columnName);
@@ -141,23 +145,25 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
             sqlBuilder.append(SCHEMA_SQL_JOIN_PART);
             sqlBuilder.append(SCHEMA_SQL_JOIN_DATA_TABLES);
             sqlCountRowsBuilder.append(SCHEMA_SQL_JOIN_DATA_TABLES);
-            for (String tableName : filter.keySet()) {
+            for (String tableName : dataTablesName) {
                 String joinTable = "join  " + tableName + "  on " + tableName + ".savings_account_transaction_id = savt.id ";
                 sqlBuilder.append(joinTable);
                 sqlCountRowsBuilder.append(joinTable);
                 Map<String, List<Object>> columnFilters = filter.get(tableName);
-                for (String columnName : columnFilters.keySet()) {
-                    List list = columnFilters.get(columnName);
-                    if (list.size() == 1) {
-                        String where = " and " + tableName + "." + columnName + " = " + list.get(0) + " ";
-                        sqlBuilder.append(where);
-                        sqlCountRowsBuilder.append(where);
-                        continue;
-                    }
-                    if (list.size() == 2) {
-                        String where = " and " + tableName + "." + columnName + " between " + list.get(0) + " and " + list.get(1) + " ";
-                        sqlBuilder.append(where);
-                        sqlCountRowsBuilder.append(where);
+                if (columnFilters != null) {
+                    for (String columnName : columnFilters.keySet()) {
+                        List list = columnFilters.get(columnName);
+                        if (list.size() == 1) {
+                            String where = " and " + tableName + "." + columnName + " = " + list.get(0) + " ";
+                            sqlBuilder.append(where);
+                            sqlCountRowsBuilder.append(where);
+                            continue;
+                        }
+                        if (list.size() == 2) {
+                            String where = " and " + tableName + "." + columnName + " between " + list.get(0) + " and " + list.get(1) + " ";
+                            sqlBuilder.append(where);
+                            sqlCountRowsBuilder.append(where);
+                        }
                     }
                 }
             }
@@ -204,7 +210,7 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
             final CurrencyData currency = new CurrencyData(currencyCode, currencyName, currencyDigits, inMultiplesOf, currencyDisplaySymbol,
                     currencyNameCode);
             Map<String, Map<String, Object>> dataTablesMap = new HashMap<>();
-            for (String tableName : filter.keySet()) {
+            for (String tableName : dataTablesName) {
                 Map<String, Object> map = new HashMap<>();
                 List<String> columnNames = getTableColumns(this.dataSource, tableName);
                 for (String column : columnNames) {
