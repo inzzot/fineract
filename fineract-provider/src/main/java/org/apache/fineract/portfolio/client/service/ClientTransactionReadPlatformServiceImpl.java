@@ -233,29 +233,14 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
         private static final String SCHEMA_SQL_JOIN_PART = "join m_savings_account_transaction tr on tr.savings_account_id = sa.id "
                 + " join m_currency curr on curr.code = sa.currency_code ";
 
-        private final String schemaSql;
         private String sqlCountRows;
         private final DataSource dataSource;
-        private Map<String, Map<String, List<Object>>> filter;
+        private List<String> dataTablesName;
+        private final JdbcTemplate jdbcTemplate;
 
         ClientSavingsAccountTransactionMapper(DataSource dataSource) {
-            final StringBuilder sqlBuilder = new StringBuilder(400);
-            sqlBuilder.append(SCHEMA_SQL_SELECTION_PART);
-            sqlBuilder.append(SCHEMA_SQL_FROM_PART);
-            sqlBuilder.append(SCHEMA_SQL_JOIN_PART);
-
-            final StringBuilder sqlCountRowsBuilder = new StringBuilder(400);
-            sqlCountRowsBuilder.append(SCHEMA_SQL_COUNT_SELECTION);
-            sqlCountRowsBuilder.append(SCHEMA_SQL_FROM_PART);
-            sqlCountRowsBuilder.append(SCHEMA_SQL_JOIN_PART);
-
-            this.schemaSql = sqlBuilder.toString();
-            this.sqlCountRows = sqlCountRowsBuilder.toString();
             this.dataSource = dataSource;
-        }
-
-        public String schema() {
-            return this.schemaSql;
+            this.jdbcTemplate = new JdbcTemplate(dataSource);
         }
 
         public String getSqlCountRows() {
@@ -263,16 +248,16 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
         }
 
         public String schema(Map<String, Map<String, List<Object>>> filter) {
-            this.filter = filter;
-            if (filter.isEmpty()) {
-                return schema();
-            }
+            this.dataTablesName = getDataTableNames(this.jdbcTemplate, "m_savings_account_transaction");
             final StringBuilder sqlCountRowsBuilder = new StringBuilder(400);
-            sqlCountRowsBuilder.append(this.sqlCountRows);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_COUNT_SELECTION);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_FROM_PART);
+            sqlCountRowsBuilder.append(SCHEMA_SQL_JOIN_PART);
 
             final StringBuilder sqlBuilder = new StringBuilder(400);
             sqlBuilder.append(SCHEMA_SQL_SELECTION_PART);
-            for (String tableName : filter.keySet()) {
+
+            for (String tableName : this.dataTablesName) {
                 List<String> columnNames = getTableColumns(this.dataSource, tableName);
                 for (String columnName : columnNames) {
                     sqlBuilder.append(", " + tableName + "." + columnName + " as " + tableName + "_" + columnName);
@@ -281,26 +266,29 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
             sqlBuilder.append(SCHEMA_SQL_FROM_PART);
             sqlBuilder.append(SCHEMA_SQL_JOIN_PART);
 
-            for (String tableName : filter.keySet()) {
+            for (String tableName : dataTablesName) {
                 String joinTable = "join  " + tableName + "  on " + tableName + ".savings_account_transaction_id = tr.id ";
                 sqlBuilder.append(joinTable);
                 sqlCountRowsBuilder.append(joinTable);
                 Map<String, List<Object>> columnFilters = filter.get(tableName);
-                for (String columnName : columnFilters.keySet()) {
-                    List list = columnFilters.get(columnName);
-                    if (list.size() == 1) {
-                        String where = " and " + tableName + "." + columnName + " = " + list.get(0) + " ";
-                        sqlBuilder.append(where);
-                        sqlCountRowsBuilder.append(where);
-                        continue;
-                    }
-                    if (list.size() == 2) {
-                        String where = " and " + tableName + "." + columnName + " between " + list.get(0) + " and " + list.get(1) + " ";
-                        sqlBuilder.append(where);
-                        sqlCountRowsBuilder.append(where);
+                if (columnFilters != null) {
+                    for (String columnName : columnFilters.keySet()) {
+                        List list = columnFilters.get(columnName);
+                        if (list.size() == 1) {
+                            String where = " and " + tableName + "." + columnName + " = " + list.get(0) + " ";
+                            sqlBuilder.append(where);
+                            sqlCountRowsBuilder.append(where);
+                            continue;
+                        }
+                        if (list.size() == 2) {
+                            String where = " and " + tableName + "." + columnName + " between " + list.get(0) + " and " + list.get(1) + " ";
+                            sqlBuilder.append(where);
+                            sqlCountRowsBuilder.append(where);
+                        }
                     }
                 }
             }
+            this.sqlCountRows = sqlCountRowsBuilder.toString();
             return sqlBuilder.toString();
         }
 
@@ -331,7 +319,7 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
                     currencyNameCode);
 
             Map<String, Map<String, Object>> dataTablesMap = new HashMap<>();
-            for (String tableName : filter.keySet()) {
+            for (String tableName : this.dataTablesName) {
                 Map<String, Object> map = new HashMap<>();
                 List<String> columnNames = getTableColumns(this.dataSource, tableName);
                 for (String column : columnNames) {
@@ -361,6 +349,12 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
         } catch (MetaDataAccessException ex) {
             throw new RuntimeException("Get table column name list failed", ex);
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    public static List<String> getDataTableNames(final JdbcTemplate jdbcTemplate, String applicationTableName) {
+        String sql = "SELECT registered_table_name FROM x_registered_table WHERE application_table_name = ? ";
+        return jdbcTemplate.queryForList(sql, new Object[] { applicationTableName }, String.class);
     }
 
     @Override
@@ -412,8 +406,8 @@ public class ClientTransactionReadPlatformServiceImpl implements ClientTransacti
     @Override
     public Page<ClientSavingsAccountTransactionData> retrieveAllSavingsAccountTransactions(Long clientId,
             SearchParameters searchParameters) {
-        final StringBuilder sqlBuilder = new StringBuilder();
 
+        final StringBuilder sqlBuilder = new StringBuilder();
         sqlBuilder.append(this.clientSavingsAccountTransactionMapper.schema(searchParameters.getDataTableFilters()))
                 .append(" where sa.client_id = ? order by tr.transaction_date DESC, tr.created_date DESC, tr.id DESC ");
 
