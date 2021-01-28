@@ -215,11 +215,11 @@ public class ClientReadPlatformServiceImpl implements ClientReadPlatformService 
                         .append(appUserID).append(") ");
             }
 
-            final String extraCriteria = buildSqlStringFromClientCriteria(this.clientMapper.schema(), searchParameters, paramList);
+            final String[] extraCriteria = buildSqlStringFromClientCriteria(this.clientMapper.schema(), searchParameters, paramList);
 
-            if (StringUtils.isNotBlank(extraCriteria)) {
-                sqlBuilder.append(" and (").append(extraCriteria).append(")");
-                sqlCountRowsBuilder.append(" and (").append(extraCriteria).append(")");
+            if (StringUtils.isNotBlank(extraCriteria[0])) {
+                sqlBuilder.append(" and (").append(extraCriteria[0]).append(")");
+                sqlCountRowsBuilder.append(" and (").append(extraCriteria[1]).append(")");
             }
 
             if (searchParameters.isOrderByRequested()) {
@@ -242,8 +242,9 @@ public class ClientReadPlatformServiceImpl implements ClientReadPlatformService 
                 paramList.toArray(), this.clientMapper);
     }
 
-    private String buildSqlStringFromClientCriteria(String schemaSql, final SearchParameters searchParameters, List<Object> paramList) {
-
+    private String[] buildSqlStringFromClientCriteria(String schemaSql, final SearchParameters searchParameters, List<Object> paramList) {
+        StringBuilder countCriteria = new StringBuilder(200);
+        String countSQL = "";
         String sqlSearch = searchParameters.getSqlSearch();
         final Long officeId = searchParameters.getOfficeId();
         final String externalId = searchParameters.getExternalId();
@@ -257,17 +258,20 @@ public class ClientReadPlatformServiceImpl implements ClientReadPlatformService 
             sqlSearch = sqlSearch.replaceAll(" display_name ", " c.display_name ");
             sqlSearch = sqlSearch.replaceAll("display_name ", "c.display_name ");
             extraCriteria = " and (" + sqlSearch + ")";
+            countCriteria.append(" and (" + sqlSearch + ")");
             this.columnValidator.validateSqlInjection(schemaSql, sqlSearch);
         }
 
         if (officeId != null) {
             extraCriteria += " and c.office_id = ? ";
             paramList.add(officeId);
+            countCriteria.append(" and c.office_id = ").append(officeId);
         }
 
         if (externalId != null) {
             paramList.add(externalId);
             extraCriteria += " and c.external_id like ? ";
+            countCriteria.append(" and c.external_id like '").append(externalId).append("' ");
         }
 
         if (displayName != null) {
@@ -275,36 +279,44 @@ public class ClientReadPlatformServiceImpl implements ClientReadPlatformService 
             // if(c.firstname > '',' ', '') , ifnull(c.lastname, '')) like "
             paramList.add("%" + displayName + "%");
             extraCriteria += " and c.display_name like ? ";
+            countCriteria.append(" and c.display_name like '%").append(displayName).append("%' ");
         }
 
         if (status != null) {
             ClientStatus clientStatus = ClientStatus.fromString(status);
             extraCriteria += " and c.status_enum = " + clientStatus.getValue().toString() + " ";
+            countCriteria.append(" and c.status_enum = '").append(clientStatus.getValue().toString()).append("' ");
         }
 
         if (firstname != null) {
             paramList.add(firstname);
             extraCriteria += " and c.firstname like ? ";
+            countCriteria.append(" and c.firstname like '").append(firstname).append("' ");
         }
 
         if (lastname != null) {
             paramList.add(lastname);
             extraCriteria += " and c.lastname like ? ";
+            countCriteria.append(" and c.lastname like '").append(lastname).append("' ");
         }
 
         if (searchParameters.isScopedByOfficeHierarchy()) {
             paramList.add(searchParameters.getHierarchy() + "%");
             extraCriteria += " and o.hierarchy like ? ";
+            countCriteria.append(" and o.hierarchy like '").append(searchParameters.getHierarchy()).append("%' ");
         }
 
         if (searchParameters.isOrphansOnly()) {
             extraCriteria += " and c.id NOT IN (select client_id from m_group_client) ";
+            countCriteria.append(" and c.id NOT IN (select client_id from m_group_client) ");
         }
 
         if (StringUtils.isNotBlank(extraCriteria)) {
             extraCriteria = extraCriteria.substring(4);
+            countSQL = countCriteria.toString().substring(4);
         }
-        return extraCriteria;
+
+        return new String[] { extraCriteria, countSQL };
     }
 
     @Override
